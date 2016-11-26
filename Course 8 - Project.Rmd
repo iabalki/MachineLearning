@@ -1,0 +1,195 @@
+---
+title: "Course 8 Project"
+author: "iabalki"
+date: "Monday, November 21, 2016"
+output: word_document
+---
+
+-- The Assignment
+--- Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. [...] In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+--- Goal
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with.
+
+
+---Data Input - Sources
+The training data for this project are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+The test data are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+More information is available from the website here: 
+<http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset)
+
+---Data Input Explained 
+The information in this section is sourced from the above "more information" page.
+The objective of the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The "how (well)" investigation has only received little attention so far, even though it potentially provides useful information for a large variety of applications,such as sports training.
+
+The owners of the experiement used (among other approaches) an on-body sensing approach (dataset here), where they attached sensors to six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions:
+* exactly according to the specification (Class A)
+* throwing the elbows to the front (Class B)
+* lifting the dumbbell only halfway (Class C)
+* lowering the dumbbell only halfway (Class D) and
+* throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).
+
+--- Requirements for completion of the Assignment:
+* Create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did
+* Use your prediction model to predict 20 different test cases
+* Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. 
+* It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online 
+
+--- Legal Disclaimer
+This data was only used for a Coursera machine learning class. 
+The data was obtained from the following study: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+
+-- Summary of Completed Analyis on this Assignment
+After the data was loaded and cleaned (columns and rows removed) - two algorims were used to predict the values of a testing dataset [part of the training dataset] - decision trees (accuracy 77%) and random forests (accuracy 99%). The random forest method was selected and predictions were created with it, as follows:
+
+1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 
+ B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B
+
+
+-- Step-By-Step Execution incl Design Choices
+The following section will describe the how the model was build and why certain choices were made. All the relevant code is also included in order to make the results reproducable.
+
+---- Load the Data 
+The data was loaded in memory:
+
+```{r}
+setwd ("D:/Users/Milla/Documents/Data Science Classes/Course 8 Project")
+
+training <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), na.strings=c("NA","#DIV/0!",""))
+
+#in order to reproduce it
+set.seed(12345)
+
+```
+
+---- Explore the data 
+Here I poked around the data to get a look and feel of it using the folowing commangs (execution is omitted to fit in the size limits)
+
+## poke around the data to see it..
+str(training)
+str(testing)
+summary (testing)
+summary (training)
+View (training)
+View(testing)
+
+Then I had to ask and answer some more specific questions:
+```{r}
+
+## is X a unique identifier (kinda the same as row number)?
+length (unique (training$X))==nrow (training)
+output <- NULL
+for (i in 1:nrow (training)) {if (!(training$X [i]==i)) {output [i] == FALSE} else {output [i] = TRUE}}
+summary(output)   
+## seems like it :)
+## check which columns that are in training are not in test
+for (i in 1:ncol (training)) {if (!(names(training)[i] %in% names (testing))) {print(names(training)[i])}}
+## check which columns that are in testing are not in training
+for (i in 1:ncol (testing)) {if (!(names(testing)[i] %in% names (training))) {print(names(testing)[i])}}
+
+```
+
+Observations from the exploration:
+* There is no data documentetion on all of the variables describing their meaning [and no data analyst should do analysis on data they don't understand in in real life :)]
+* The training dataset has 19622 observations and 160 variables, and the testing data set has 20 observations and the same number of variables as the training set, however:
+** We are trying to predict the outcome of the variable "classe" (a factor variable with possible options A-E) which is in training but not in testing
+** The testing set seems to have an addititional variable called "problem_id" - presumable it will be needed for identifying the use case for the predicted output.
+
+* While there are 160 variables (columns) in the training set -- a lot of those seem to be a summary statsitics for a single exercise performed by an individiual -- those only contain values where "new_window" variable == "yes".
+
+Therefore before we start we should:
+* remove all summary lines i.e. rowns where "new_window" variable == "yes"
+* remove all columns that are empty threafter (we will load blanks as NAs to more easily identify those)
+* remove column X as it is an identifier and we do not want to include it in the model
+* remove the number window (two diff columns by the name "new_window" as they are also identifiers for the use case and should not be used for predicting
+* remove - timestamps -- timestamps might be good predictors if the subjects were part of an experiment where their endurance was tested but given that this was a light weight and how-well-did-we-perform-the-exercise test, the timestamps would likley not add significant value (besides for chronological purposes). In addition, they could have helped with calulating the motion (acceleration / speed, etc) but since we neither understand the data, nor we have understnading of basic physics and how these data points tie together.. for the purpose of this assignement - I will ignore them.
+* remove the identifier of the person who is performing the exercise (not something you can control for future predictions)
+
+---- Clean the data
+Now, lets execute the plan made ealier.
+
+```{r}
+## there are two new_window columsn and we can't use them until we name them differntly
+names (training) [6] <- "new_window_fac" 
+## remove any line item with summary values
+trainClean<-subset(training, new_window_fac=="no")
+## remove any columns where ther are more than 50% of NAs in the column (likley to be poor predictor)
+excludeLevel <- nrow (trainClean)*0.5
+output<-NULL
+for (i in 1:ncol (trainClean)) {if (sum(is.na(trainClean[, i])) > excludeLevel) {output <-c(output,i)}}
+trainClean <-trainClean[,-output]
+rm(excludeLevel)
+
+## remove the fist 7 columns that contain X, user name, new windwows id and the timestamps - see reasoning in the observations in previous section
+trainClean<-trainClean [,-c(1:7)]
+
+```
+
+---- Create a training and testing set 
+
+```{r}
+library (caret)
+inTrain <- createDataPartition(trainClean$classe, p=0.6, list=FALSE)
+myTrain <- trainClean[inTrain, ]
+myTest <- trainClean[-inTrain, ]
+dim(myTrain); dim(myTest)
+
+```
+
+
+--- Predicting with Decision Trees + Cross-Validation
+
+Here we will let R create a decision tree model that will allow us to predice "classe". The resulting predicted value will be compared to the actual known value in my test dataset and accuracy of the prediction will be evaluated.
+
+
+```{r}
+library(AppliedPredictiveModeling)
+library (rpart)
+
+suppressMessages(library(rattle))
+library(rpart.plot)
+
+model_dt <- rpart(classe ~ ., data=myTrain, method="class")
+fancyRpartPlot(model_dt)
+
+prediction_dt <- predict(model_dt, myTest, type = "class")
+confusionMatrix(prediction_dt, myTest$classe)
+```
+
+Accuracy for this 77% which is relatively low.
+
+--- Predicting with Random Forest + Cross Validation
+
+Here we will let R create a model using the random forest method that will allow us to predict "classe". The resulting predicted value will be compared to the actual known value in my test dataset and accuracy of the prediction will be evaluated.
+
+```{r}
+suppressMessages(library(randomForest))
+model_rf <- randomForest(classe ~ ., data=myTrain)
+prediction_rf <- predict(model_rf, myTest, type = "class")
+confusionMatrix(prediction_rf, myTest$classe)
+
+```
+Accuracy is 99%.
+
+--- Selecting the model
+Now given that accuracy is our main criteria, I elected to use the random forest model and predict the values for original testing set.
+
+Decsion Trees - 77%
+Random Forest - 99%
+
+--- Predicting the values
+
+```{r}
+prediction <- predict(model_rf, testing, type = "class")
+prediction
+
+```
+
+the end
